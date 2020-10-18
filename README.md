@@ -1,1 +1,23 @@
-# analysis-of-student-loan-data
+# An Analysis of National Student Loan Data from 2009-2015
+
+## Summary 
+When deciding where to attend college, choices between public versus private and local versus out-of-state can mean the difference between acquiring an immense amount of debt due to student loans, or going to a more affordable but less prestigious school. Paying off student loans can take quite some time, upwards of 10 plus years, and these debts continue to increase when considering intentions of pursuing a graduate degree<sup>(1)</sup>. The debt that can follow a student after college may take a while to pay off—whether or not they actually complete a degree—and can impact other factors such as their credit score, the ability to buy a house, or taking out loans for other life investments<sup>(2,3)</sup>.
+
+While the costs for higher education continues to grow, recently companies such as IBM, Google, and Apple have stopped requiring college degrees to apply for jobs<sup>(4)</sup>. Students looking to apply to college may think twice about their decision, considering how much time and money it would take to complete their degree if companies are hiring them regardless of whether or not they attended college. With this in mind, we wanted to look at factors contributing to students’ ability to repay their college loans, and draw conclusions on important parameters that students should consider when making decisions about their college investment.
+
+We were able to explore some of the potential factors related to student loans through the College Scorecard dataset, which is a data source generated and maintained by the U.S. Department of Education. The dataset was created under the Obama Administration in 2013, and is designed to increase transparency in higher education by allowing the public to assess schools on how well they are serving their students<sup>(5)</sup>. We chose to use this dataset because it contains detailed information on every undergraduate institution in the country in the following categories: Academics, Admissions, Student Body, Cost, Aid, Completion, Repayment, and Earnings<sup>(6)</sup>. This dataset gives a comprehensive look at national universities and spans more than 20 years, from 1996-2017.
+
+We looked at national student loan data from 2009-2015 across all 4-year public and private universities to see if we could predict the percentage of students at a school who could pay off their loans within three years. We first subsetted the dataset to examine variables we thought could potentially relate to our response variable, the 3-year repayment rate, such as student demographics, location, cumulative debt, cost of tuition, family earnings, and visualized these variables on a national and local level. Through extensive exploratory data analysis (EDA) and observing trends within these variables, we were able to further narrow down the variables considered as potential predictors for modeling. We then examined the relationships of these variables with the response variable and from these results fit a linear regression model to predict the 3-year repayment rate.
+
+From our analysis and modeling we found that variables such as the debt-to-earnings ratio, the percentage of students receiving Pell grants, the median earnings of federally aided students after graduation, the cost of attending the institution, and median family income are highly important in determining the 3-year repayment rate at an institution.
+
+
+## References
+1. Hess, Abigail. “This Is the Age Most Americans Pay off Their Student Loans.” CNBC, CNBC, 3 July 2017.
+(https://www.cnbc.com/2017/07/03/this-is-the-age-most-americans-pay-off-their-student-loans.html)
+2. “Life Delayed: New Study Shows Student Debt Impacts Financial Security of Borrowers Across All Institution Types, Credentials”. BusinessWire, 17 December 2015. https://www.businesswire.com/news/home/20151217006048/en/Life-Delayed-New-Study-Shows -Student-Debt
+3. Trull, Jeffrey. “How Do Student Loans Affect Your Credit Score?” Student Loan Hero, Student Loan Hero, 3 Dec. 2014. (https://studentloanhero.com/student-loans/student-loan-repayment/how-do-student-loans-affect-y our-credit-score/)
+4. Connley, Courtney. “Google, Apple and 12 Other Companies That No Longer Require a College
+Degree.” CNBC, CNBC, 8 Oct. 2018. (https://www.cnbc.com/2018/08/16/15-companies-that-no-longer-require-employees-to- have-a-college-degree.html)
+5. US Department of Education. “College Scorecard Data.” College Scorecard, US Department of Education, 28 Sept. 2018. (https://collegescorecard.ed.gov/data/)
+6. US Department of Education. “Data Documentation for College Scorecard .” College Scorecard, US Department of Education, 28 Sept. 2018. (https://collegescorecard.ed.gov/assets/FullDataDocumentation.pdf)
