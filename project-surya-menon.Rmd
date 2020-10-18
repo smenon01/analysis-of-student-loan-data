@@ -1,0 +1,497 @@
+---
+title: "DS5110 Project Code"
+author: "Surya Menon"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r loadLibraries}
+library(tidyverse)
+library(modelr)
+library(fiftystater)
+```
+
+## Code for Project
+
+```{r projectCode1}
+# EDA - 2008-2013, use UGDS
+
+# not look at 2016-16 - too much null data, no earnings data
+
+loan_1617 <- read_csv("MERGED2016_17_PP.csv", na=(""))
+
+loan_1617 <- read_csv("MERGED2013_14_PP.csv", na=(""))
+
+# if multiple years, add this variable
+loan_1617 %>% mutate(year = "2016_17")
+
+# Massachusetts schools
+mass <- c("MIT","Harvard University",
+"Brandeis University", "Boston College", "Tufts University",
+"UMass-Amherst", "UMass-Lowell", "UMass-Boston", "MCLA","UMass-Dartmouth") 
+# MCLA = Massachusetts College of Liberal Arts
+
+degrees <- c("Computer Science", "Education", "Engineering", "Liberal Arts", "Biology", "Philosophy", "Social Sciences", "Visual/Performing Arts")
+
+loan <- resample_partition(loan_1617, c(train=0.6, valid=0.2, test=0.2))
+loan$train <- as_tibble(loan$train)
+
+# mass - degrees 
+loan_1617 %>% 
+  filter(INSTNM %in% mass) %>%
+  select(INSTNM, CONTROL,PCIP11, PCIP13, PCIP14, 
+         PCIP24, PCIP26, PCIP38, PCIP45, PCIP50) %>%
+  rename_at(vars(PCIP11:PCIP50), ~degrees) %>%
+  gather(3:10, key="Degree", value = "% Awarded") %>%
+  mutate(`% Awarded` = as.numeric(`% Awarded`), 
+         Degree = as.factor(Degree)) %>%
+  ggplot(aes(x=INSTNM, y = `% Awarded`, fill=CONTROL)) +
+  geom_col( position="dodge") + 
+  facet_wrap(~Degree, scales="free") + coord_flip()
+
+# to add: labels, text vertical, remove legend, reorder, facet order; add by year (line chart)? 
+
+# earnings reference table: https://www.bls.gov/oes/2017/may/oes_nat.htm#19-0000 
+# # Justify Selection of Degrees looked at
+
+# title iv price - use # redo with COSTT4_A refactor, ICLEVEL == "1"
+loan$train %>% 
+  filter(CONTROL %in% c("1", "2"), ICLEVEL == "1") %>%
+  select(INSTNM, CONTROL,COSTT4_A) %>%
+  mutate(AvgPrice = as.numeric(COSTT4_A)) %>%
+  group_by(CONTROL) %>%
+  summarise(avg = mean(AvgPrice, na.rm=TRUE)) %>%
+  ggplot(aes(x=CONTROL, y=avg, fill=CONTROL)) + geom_col()
+
+# add labesl, not use training data here, year
+
+loan$train %>% 
+  filter(CONTROL %in% c("1", "2"),PREDDEG == "3") %>%
+  select(NPT4_PUB, COMPL_RPY_3YR_RT) %>%
+  mutate(
+    NPT4_PUB = as.numeric(NPT4_PUB),
+    COMPL_RPY_3YR_RT = as.numeric(COMPL_RPY_3YR_RT)
+  ) %>%
+  ggplot(aes(x=NPT4_PUB, y=COMPL_RPY_3YR_RT)) + geom_point(alpha=1/10, na.rm=TRUE)
+# use this - EDA modeling 
+loan_filter <- loan_1617 %>%
+    filter(CONTROL %in% c("1", "2"),PREDDEG == "3")
+
+# fees - out of state v instate - group by state
+loan_1617 %>% 
+  filter(CONTROL %in% c("1", "2"),PREDDEG == "3") %>%
+  select(INSTNM, STABBR,TUITIONFEE_OUT) %>%
+  group_by(STABBR) %>% summarise(out_fee = sum(as.numeric(TUITIONFEE_OUT), na.rm = TRUE)) %>%
+  mutate(
+    STABBR = ifelse(STABBR == "DC", "district of columbia", tolower(state.name[match(STABBR,state.abb)]))
+  ) %>%
+  ggplot(aes(map_id = STABBR)) + geom_map(aes(fill = out_fee), map = fifty_states) + expand_limits(x = fifty_states$long, y = fifty_states$lat) +
+  coord_map()
+
+loan_1617 %>% 
+  filter(CONTROL %in% c("1", "2"),PREDDEG == "3") %>%
+  select(INSTNM, STABBR,TUITIONFEE_IN) %>%
+  group_by(STABBR) %>% summarise(in_fee = mean(as.numeric(TUITIONFEE_IN), na.rm = TRUE)) %>%
+  mutate(
+    STABBR = ifelse(STABBR == "DC", "district of columbia", tolower(state.name[match(STABBR,state.abb)]))
+  ) %>%
+  ggplot(aes(map_id = STABBR)) + geom_map(aes(fill = in_fee), map = fifty_states) + expand_limits(x = fifty_states$long, y = fifty_states$lat) +
+  coord_map()
+
+# add lables, combine plots, years?
+
+# mass completion rate - C150_4
+loan_1617 %>%
+  filter(INSTNM %in% mass) %>%
+  mutate(INSTNM = reorder(INSTNM, as.numeric(C150_4)), CONTROL = recode(CONTROL, "1" = "Public","2" = "Private")) %>%
+  group_by(CONTROL) %>%
+  ggplot() + geom_col(aes(x=INSTNM, y=C150_4, fill=CONTROL)) + coord_flip()
+# add labels, vertical, by year?
+
+# undergrad percent by state
+# total undergrads = UG/UGDS * PFTFTUG1_EF = number - only null values for UG; use ugds
+loan_1617 %>% 
+  filter(CONTROL %in% c("1", "2"),PREDDEG == "3") %>%
+  mutate(
+    first_time = as.numeric(UGDS) * as.numeric(PFTFTUG1_EF)
+  ) %>% select(INSTNM, STABBR,first_time) %>%
+  group_by(STABBR) %>% summarise(tot_stu = mean(first_time, na.rm = TRUE)) %>%
+  mutate(
+    STABBR = ifelse(STABBR == "DC", "district of columbia", tolower(state.name[match(STABBR,state.abb)]))
+  ) %>%
+  ggplot(aes(map_id = STABBR)) + geom_map(aes(fill = tot_stu), map = fifty_states) + expand_limits(x = fifty_states$long, y = fifty_states$lat) +
+  coord_map()
+# add labels, year?
+
+# cost of attendance - 2016-17
+loan_1617 %>% 
+  filter(CONTROL %in% c("1", "2"),PREDDEG == "3") %>%
+  mutate(
+    cost = as.numeric(COSTT4_A) 
+  ) %>% select(INSTNM, STABBR,cost) %>%
+  group_by(STABBR) %>% summarise(tot_stu = mean(cost, na.rm = TRUE)) %>%
+  mutate(
+    STABBR = ifelse(STABBR == "DC", "district of columbia", tolower(state.name[match(STABBR,state.abb)]))
+  ) %>%
+  ggplot(aes(map_id = STABBR)) + geom_map(aes(fill = tot_stu), map = fifty_states) + expand_limits(x = fifty_states$long, y = fifty_states$lat) +
+  coord_map() + labs(x = "", y = "", title = "Average cost of attendance by state, 2016-2017") +
+  theme(legend.position = "bottom", 
+        panel.background = element_blank()) + scale_fill_gradientn(name = "", colours=rainbow(6))
+
+# get actual numbers
+loan_1617 %>% 
+  filter(CONTROL %in% c("1", "2"),PREDDEG == "3") %>%
+  mutate(
+    cost = as.numeric(COSTT4_A) 
+  ) %>% select(INSTNM, STABBR,cost) %>%
+  group_by(STABBR) %>% summarise(tot_stu = mean(cost, na.rm = TRUE)) %>% arrange(desc(tot_stu))
+
+library(knitr)
+
+top5 <- loan_1617 %>% 
+  filter(CONTROL %in% c("1", "2"),PREDDEG == "3") %>%
+  mutate(cost = as.numeric(COSTT4_A)) %>% select(INSTNM, STABBR,cost) %>%
+group_by(STABBR) %>% summarise(tot_stu = mean(cost, na.rm = TRUE)) %>% arrange(desc(tot_stu)) 
+kable(top5)
+
+# loan compare pell grant 
+# Privacy Suppressed value
+loan$train %>% 
+  filter(CONTROL %in% c("1", "2"),PREDDEG == "3") %>%
+  gather(PELL_COMP_ORIG_YR4_RT, PELL_WDRAW_ORIG_YR4_RT, key = "Status", value="Percent") %>%
+  select(INSTNM, CONTROL, Status, Percent) %>%
+  filter(Percent != "PrivacySuppressed") %>%
+  mutate(Percent = as.numeric(Percent),
+         Status = recode(Status, PELL_COMP_ORIG_YR4_RT = "Pell-Complete", PELL_WDRAW_ORIG_YR4_RT = "Pell-Withdraw")) %>% group_by(Status) %>% summarise(avg_pct = mean(Percent, na.rm=TRUE)) %>% ggplot(aes(x=Status, y=avg_pct)) + geom_col()
+# v federal loan
+loan$train %>% 
+  filter(CONTROL %in% c("1", "2"),PREDDEG == "3") %>%
+  gather(LOAN_COMP_ORIG_YR4_RT, LOAN_WDRAW_ORIG_YR4_RT, key = "Status", value="Percent") %>%
+  select(INSTNM, CONTROL, Status, Percent) %>%
+  filter(Percent != "PrivacySuppressed") %>%
+  mutate(Percent = as.numeric(Percent),
+         Status = recode(Status, LOAN_COMP_ORIG_YR4_RT = "Loan-Complete", LOAN_WDRAW_ORIG_YR4_RT = "Loan-Withdraw")) %>% group_by(Status) %>% summarise(avg_pct = mean(Percent, na.rm=TRUE)) %>% ggplot(aes(x=Status, y=avg_pct)) + geom_col()
+# add labels, without training, years?
+
+# mass family education
+loan_1617 %>%
+  filter(INSTNM %in% mass) %>%
+  gather(PAR_ED_PCT_MS, PAR_ED_PCT_HS,PAR_ED_PCT_PS, key="ParentEdu", value = "Percent") %>%
+  select(INSTNM, CONTROL, ParentEdu, Percent) %>%
+  mutate(Percent = as.numeric(Percent), 
+         ParentEdu = recode(ParentEdu, PAR_ED_PCT_MS = "MiddleSchool", PAR_ED_PCT_HS = "HighSchool", PAR_ED_PCT_PS = "PostSecondary"), 
+         CONTROL = recode(CONTROL, "1" = "Public","2" = "Private")) %>%
+  ggplot() + geom_col(aes(x = INSTNM, y = Percent, fill = ParentEdu), position = "dodge") + facet_wrap(~CONTROL, scales = "free") + theme(axis.text.x = element_text(angle = 70, hjust = 1))
+# add labels, by year?
+
+# mass income - color by public
+loan_1617 %>%
+  filter(INSTNM %in% mass) %>%
+  select(INSTNM, MD_FAMINC) %>%
+  mutate(
+    MD_FAMINC = as.numeric(MD_FAMINC),
+    INSTNM = as.factor(INSTNM),
+    INSTNM = reorder(INSTNM, MD_FAMINC)
+  ) %>%
+  ggplot(aes(INSTNM, MD_FAMINC)) + geom_col() + coord_flip()
+# rename, vertical labels, color private/public, by year?
+
+# mass earnings
+loan$train %>% 
+  filter(CONTROL %in% c("1", "2"),PREDDEG == "3") %>%
+  mutate(MD_EARN_WNE_P6 = as.numeric(MD_EARN_WNE_P6)) %>%
+  select(CONTROL, MD_EARN_WNE_P6) %>%
+  group_by(CONTROL) %>%
+  summarise(earn = mean(MD_EARN_WNE_P6, na.rm=TRUE)) %>%
+  ggplot(aes(x=CONTROL, y=earn, fill=CONTROL)) + geom_col()
+# make CONTROL factor, years, not training data?, labels
+
+```
+
+presentation code below:
+```{r presentCode}
+# merge
+col_08_09 <- read.csv("MERGED2016_17_PP.csv")
+col_08_09 <- col_08_09 %>%
+  mutate("Year" = "2008-09")
+
+col_09_10 <- read.csv("MERGED2009_10_PP.csv")
+col_09_10 <- col_09_10 %>%
+  mutate("Year" = "2009-10")
+
+col_10_11 <- read.csv("MERGED2010_11_PP.csv")
+col_10_11 <- col_10_11 %>%
+  mutate("Year" = "2010-11")
+
+col_11_12 <- read.csv("MERGED2011_12_PP.csv")
+col_11_12 <- col_11_12 %>%
+  mutate("Year" = "2011-12")
+
+col_12_13 <- read.csv("MERGED2012_13_PP.csv")
+col_12_13 <- col_12_13 %>%
+  mutate("Year" = "2012-13")
+
+col_13_14 <- read.csv("MERGED2013_14_PP.csv")
+col_13_14 <- col_13_14 %>%
+  mutate("Year" = "2013-14")
+
+col_14_15 <- read.csv("MERGED2014_15_PP.csv")
+col_14_15 <- col_14_15 %>%
+  mutate("Year" = "2014_15")
+
+college_08_13 <- rbind(col_08_09, col_09_10, col_10_11, col_11_12, col_12_13, col_13_14, col_14_15)
+
+# subset
+colleges <- select(college_08_13, Year, COSTT4_A, ICLEVEL, INSTNM, CITY, REGION, STABBR, LATITUDE, LONGITUDE, CONTROL, PCIP11:PCIP50, UGDS, UGDS_WHITE, UGDS_BLACK, UGDS_HISP, UGDS_ASIAN, UGDS_AIAN, UGDS_NHPI, UGDS_2MOR, UGDS_NRA, UGDS_UNKN, UGDS_WHITENH, UGDS_BLACKNH, UGDS_API, NPT4_PUB, NPT4_PRIV, NUM4_PUB, NUM4_PRIV, NUM41_PUB, NUM42_PUB, NUM43_PUB, NUM44_PUB, NUM45_PUB, NUM41_PRIV, NUM42_PRIV, NUM43_PRIV, NUM44_PRIV, NUM45_PRIV, TUITIONFEE_IN, TUITIONFEE_OUT, PCTPELL, C150_4, PFTFTUG1_EF, PCTFLOAN, PELL_COMP_ORIG_YR4_RT, PELL_WDRAW_ORIG_YR4_RT, LOAN_COMP_ORIG_YR4_RT, LOAN_WDRAW_ORIG_YR4_RT, COMPL_RPY_3YR_RT, NONCOM_RPY_3YR_RT, LO_INC_RPY_3YR_RT, MD_INC_RPY_3YR_RT, HI_INC_RPY_3YR_RT, PELL_RPY_3YR_RT, PAR_ED_PCT_MS, PAR_ED_PCT_HS, PAR_ED_PCT_PS, DEBT_MDN, GRAD_DEBT_MDN, WDRAW_DEBT_MDN, LO_INC_DEBT_MDN, MD_INC_DEBT_MDN, HI_INC_DEBT_MDN, PELL_DEBT_MDN, DEBT_N, GRAD_DEBT_N, WDRAW_DEBT_N, LO_INC_DEBT_N, MD_INC_DEBT_N, HI_INC_DEBT_N, PELL_DEBT_N, MD_FAMINC, UGDS_MEN, UGDS_WOMEN, RPY_3YR_N, MD_EARN_WNE_P6, MD_EARN_WNE_P8)
+
+# make tibble  - easier to work with
+colleges <- as_tibble(colleges)
+
+# all universities, ICLEVEL = 1 4 year, CONTROL public/private, 2008-2013, 
+
+# Massachusetts schools
+mass <- c("Massachusetts Institute of Technology","Harvard University",
+"Brandeis University", "Boston College", "Tufts University",
+"University of Massachusetts-Amherst", "University of Massachusetts-Lowell",
+"University of Massachusetts-Boston", "Massachusetts College of Liberal Arts",
+"University of Massachusetts-Dartmouth") 
+# rename 
+rename
+# MCLA = Massachusetts College of Liberal Arts
+
+# pell and federal loans - mass - free scales??
+colleges %>% filter(INSTNM %in% mass) %>% 
+  gather(PCTFLOAN, PCTPELL, key = "Loan_Type", value = "Percent") %>% mutate(
+    Percent = as.numeric(Percent),
+    Loan_Type = recode(Loan_Type, "PCTFLOAN" = "Federal Loans", "PCTPELL" = "Pell Grants"),
+    CONTROL = recode(CONTROL, "1" = "Public","2" = "Private"),
+    INSTNM = recode(INSTNM, "Massachusetts Institute of Technology" = "MIT", "University of Massachusetts-Amherst" = "UMass-Amherst", "University of Massachusetts-Lowell" = "UMass-Lowell","University of Massachusetts-Boston" = "UMass-Boston", "Massachusetts College of Liberal Arts" = "MCLA","University of Massachusetts-Dartmouth" = "UMass-Dartmouth")) %>% ggplot() +
+  geom_col(aes(x = INSTNM, y = Percent, fill = Loan_Type), position = "dodge") +
+theme(axis.text.x = element_text(angle = 70, hjust = 1)) +
+facet_wrap(~Year) +
+labs(y = "% of Students", x = "School",
+title = "% of students across top 5 public and private schools in MA \n receiving Federal Loans or Pell Grants")
+
+
+colleges %>% filter(CONTROL %in% c("1", "2"), ICLEVEL == "1") %>% 
+  filter(REGION == "1") %>%
+  mutate(PCTPELL = as.numeric(as.character(PCTPELL)),
+    CONTROL = recode(CONTROL, "1" = "Public","2" = "Private")) %>%
+group_by(Year, CONTROL, STABBR) %>% summarise(avg_loan = mean(PCTPELL, na.rm=TRUE)) %>% ggplot() + geom_col(aes(x = STABBR, y = avg_loan, fill = CONTROL), position = "dodge")  + facet_grid(~Year) +
+labs(title = "Average % of Pell Grants for New England States", y = "% of Students Receiving Pell Grants", x = "Region") +  scale_fill_discrete(name  ="Institution Type")
+ # add public and private with alpha and stack?
+# regions
+
+# median (more robust) earnings - map - pick 1 year?
+colleges %>% 
+  filter(CONTROL %in% c("1", "2"), ICLEVEL == "1") %>%
+  filter(Year != "2008-09", Year != "2010-11") %>%
+  select(INSTNM, STABBR,MD_EARN_WNE_P6, Year, GRAD_DEBT_MDN, MD_FAMINC, COSTT4_A) %>%
+  mutate(GRAD_DEBT_MDN = as.numeric(as.character(GRAD_DEBT_MDN)),
+    MD_EARN_WNE_P6 = as.numeric(as.character(MD_EARN_WNE_P6)),
+    DEBT_TO_EARN = GRAD_DEBT_MDN/MD_EARN_WNE_P6
+  ) %>%
+  group_by(STABBR, Year) %>% 
+  summarise(avg_earn = mean(DEBT_TO_EARN , na.rm = TRUE)) %>% ungroup() %>%
+  mutate(
+    STABBR = ifelse(STABBR == "DC", "district of columbia",
+                tolower(state.name[match(STABBR,state.abb)]))
+  ) %>%
+  ggplot(aes(map_id = STABBR)) + 
+  geom_map(aes(fill = avg_earn), map = fifty_states) +
+  scale_fill_gradient(name = " ") + 
+  expand_limits(x = fifty_states$long, y = fifty_states$lat) +
+  coord_map() + facet_wrap(~Year) +
+  scale_x_continuous(breaks = NULL) + 
+  scale_y_continuous(breaks = NULL) +
+  labs(x = "", y = "", title = "") +
+  theme(legend.position = "bottom", 
+        panel.background = element_blank())
+# try MD_EARN_WNE_P6, COSTT4_A, MD_FAMINC, GRAD_DEBT_MDN
+colleges %>% 
+  filter(INSTNM %in% mass, Year != "2008-09", Year != "2010-11") %>%
+  mutate(GRAD_DEBT_MDN = as.numeric(as.character(GRAD_DEBT_MDN)),
+    MD_EARN_WNE_P6 = as.numeric(as.character(MD_EARN_WNE_P6)),
+    DEBT_TO_EARN = GRAD_DEBT_MDN/MD_EARN_WNE_P6,
+    CONTROL = recode(CONTROL, "1" = "Public","2" = "Private")
+  ) %>%
+  group_by(Year, INSTNM, CONTROL) %>% 
+  summarise(avg_dte = mean(DEBT_TO_EARN , na.rm = TRUE)) %>% ungroup() %>%
+  mutate(INSTNM = reorder(INSTNM, desc(avg_dte))) %>%
+  ggplot() + geom_col(aes(x = INSTNM, y = avg_dte, fill = CONTROL), position = "dodge")  + facet_grid(~Year) + coord_flip() + 
+labs(title = "Average Debt to Earnings for Top MA Schools", y = "Average Debt to Earnings", x = "Institution") +  scale_fill_discrete(name  ="Institution Type")
+
+
+
+
+# STEM graduates - PCIP11:PCIP50 - stem specific: PCIP11, PCIP14, PCIP15, PCIP26, PCIP27, PCIP40, PCIP41
+# add relevel 
+colleges %>% filter(INSTNM %in% mass) %>%
+  mutate_at(vars(starts_with("PCIP")) ,funs(as.numeric(as.character(.)))) %>% group_by(Year) %>% mutate(
+    stem_pct = PCIP11 + PCIP14 + PCIP15 + PCIP26 + PCIP27 + PCIP40 + PCIP41, 
+    CONTROL = recode(CONTROL, "1" = "Public","2" = "Private"), INSTNM = recode(INSTNM, "Massachusetts Institute of Technology" = "MIT", "University of Massachusetts-Amherst" = "UMass-Amherst", "University of Massachusetts-Lowell" = "UMass-Lowell","University of Massachusetts-Boston" = "UMass-Boston", "Massachusetts College of Liberal Arts" = "MCLA","University of Massachusetts-Dartmouth" = "UMass-Dartmouth"),
+    INSTNM = reorder(INSTNM, stem_pct)) %>%  ggplot() + geom_col(aes(x = INSTNM, y = stem_pct, fill = CONTROL)) + theme(axis.text.x = element_text(angle = 70, hjust = 1)) + facet_wrap(~Year) + 
+  labs(y = "% of STEM graduates", x = "School",
+title = "% STEM graduates 2008-2013")
+
+# show median earning a different way - MD_EARN_WNE_P6, COSTT4_A, MD_FAMINC, GRAD_DEBT_MDN
+
+# median earnings mass schools
+colleges %>% filter(INSTNM %in% mass, Year != "2008-09", Year != "2010-11") %>% 
+  mutate(
+    MD_EARN_WNE_P8 = as.numeric(as.character(MD_EARN_WNE_P8)),
+    CONTROL = recode(CONTROL, "1" = "Public","2" = "Private"), INSTNM = recode(INSTNM, "Massachusetts Institute of Technology" = "MIT", "University of Massachusetts-Amherst" = "UMass-Amherst", "University of Massachusetts-Lowell" = "UMass-Lowell","University of Massachusetts-Boston" = "UMass-Boston", "Massachusetts College of Liberal Arts" = "MCLA","University of Massachusetts-Dartmouth" = "UMass-Dartmouth"), INSTNM = reorder(INSTNM, MD_EARN_WNE_P8)) %>% ggplot(aes(x = INSTNM, y = MD_EARN_WNE_P8)) + geom_col(aes(fill = CONTROL)) + geom_text(aes(label = MD_EARN_WNE_P8)) + coord_flip() + facet_wrap(~Year) + 
+  labs(y = "Median Earnings", x = "School",
+title = "Median Earnings Students 8 Years Post-Graduation") + scale_fill_discrete(name  ="Institution Type")
+
+# median family income  mass - just 1 year
+colleges %>%
+  filter(INSTNM %in% mass, Year != "2008-09", Year != "2010-11") %>%
+  mutate(
+    MD_FAMINC = as.numeric(as.character(MD_FAMINC)),
+    CONTROL = recode(CONTROL, "1" = "Public","2" = "Private"), INSTNM = recode(INSTNM, "Massachusetts Institute of Technology" = "MIT", "University of Massachusetts-Amherst" = "UMass-Amherst", "University of Massachusetts-Lowell" = "UMass-Lowell","University of Massachusetts-Boston" = "UMass-Boston", "Massachusetts College of Liberal Arts" = "MCLA","University of Massachusetts-Dartmouth" = "UMass-Dartmouth"), INSTNM = reorder(INSTNM, MD_FAMINC)) %>% ggplot(aes(INSTNM, MD_FAMINC)) + geom_col(aes(fill = CONTROL)) + coord_flip() + facet_wrap(~Year) + labs(y = "Median Family Income", x = "School", title="Median Family Income for Top MA Schools") + scale_fill_discrete(name  ="Institution Type")
+
+# mass family education
+colleges %>%
+  filter(INSTNM %in% mass)%>%
+  gather(PAR_ED_PCT_MS, PAR_ED_PCT_HS,PAR_ED_PCT_PS, key="ParentEdu", value = "Percent") %>%
+  select(INSTNM, CONTROL, ParentEdu, Percent, Year) %>%
+  mutate(Percent = as.numeric(as.character(Percent)), 
+         ParentEdu = recode(ParentEdu, PAR_ED_PCT_MS = "Middle School", PAR_ED_PCT_HS = "High School", PAR_ED_PCT_PS = "Post Secondary"), INSTNM = recode(INSTNM, "Massachusetts Institute of Technology" = "MIT", "University of Massachusetts-Amherst" = "UMass-Amherst", "University of Massachusetts-Lowell" = "UMass-Lowell","University of Massachusetts-Boston" = "UMass-Boston", "Massachusetts College of Liberal Arts" = "MCLA","University of Massachusetts-Dartmouth" = "UMass-Dartmouth")) %>%
+  ggplot() + geom_col(aes(x = INSTNM, y = Percent, fill = ParentEdu), position = "dodge") + theme(axis.text.x = element_text(angle = 70, hjust = 1)) + facet_wrap(~Year) +
+labs(y = "% of parents at various education levels", x = "School") + scale_fill_discrete(name = "Parent Education Level")
+
+
+# GRAD_DEBT_MDN/md_earn_wne_p6 Debt To Earnings (want low); or return on investment
+
+# (Maddie)
+# 3 year repayment rate - family income
+# median student debt for mass schools
+
+# * for report
+# mass degrees
+# number of title iv students - public v private
+# gender - ugds_men v ugds_women
+
+# check factor v character template
+colleges %>% filter(INSTNM %in% mass) %>% select(MD_EARN_WNE_P6) %>% arrange(desc(MD_EARN_WNE_P6))
+
+colleges %>% filter(INSTNM %in% mass) %>% mutate(MD_EARN_WNE_P6 = as.numeric(GRAD_DEBT_MDN)) %>% select(MD_EARN_WNE_P6) %>% arrange(desc(MD_EARN_WNE_P6))
+
+# fiftystater
+# https://github.com/wmurphyrd/fiftystater
+# https://medium.com/@NickDoesData/visualizing-geographic-data-in-r-fb2e0f5b59c5 
+
+# https://stackoverflow.com/questions/4931545/converting-string-to-numeric
+
+
+# logistic regression attempt
+# model dataset - 9-10, 11-12, 13-14, 12-13, 14-15
+col_13_14 <- read.csv("MERGED2013_14_PP.csv")
+col_13_14 <- col_13_14 %>%
+  mutate("Year" = "2013-14")
+
+col_14_15 <- read.csv("MERGED2014_15_PP.csv")
+col_14_15 <- col_14_15 %>%
+  mutate("Year" = "2014-15")
+
+college_new <- rbind(col_09_10, col_11_12, col_12_13, col_13_14, col_14_15)
+
+# subset
+colleges2 <- select(college_new, Year, COSTT4_A, ICLEVEL, INSTNM, CITY, STABBR, CONTROL, PCIP11:PCIP50, UGDS, PCTPELL, COMPL_RPY_3YR_RT, MD_INC_RPY_3YR_RT, HI_INC_RPY_3YR_RT, PELL_RPY_3YR_RT, PAR_ED_PCT_MS, PAR_ED_PCT_HS, PAR_ED_PCT_PS, DEBT_MDN, GRAD_DEBT_MDN, WDRAW_DEBT_MDN, LO_INC_DEBT_MDN, MD_INC_DEBT_MDN, HI_INC_DEBT_MDN, PELL_DEBT_MDN, DEBT_N, GRAD_DEBT_N, WDRAW_DEBT_N, LO_INC_DEBT_N, MD_INC_DEBT_N, HI_INC_DEBT_N, PELL_DEBT_N, MD_FAMINC, UGDS_MEN, UGDS_WOMEN, RPY_3YR_N, MD_EARN_WNE_P6, CDR3, MD_EARN_WNE_P8, AGE_ENTRY )
+
+colleges2 <- as_tibble(colleges2) %>% 
+  mutate(
+         COMPL_RPY_3YR_RT = as.numeric(as.character(COMPL_RPY_3YR_RT)),
+         PCTPELL = as.numeric(as.character(PCTPELL)),
+         GRAD_DEBT_MDN = as.numeric(as.character(GRAD_DEBT_MDN)),
+         MD_EARN_WNE_P8 = as.numeric(as.character(MD_EARN_WNE_P8)),
+         CDR3 = as.numeric(as.character(CDR3)),
+         AGE_ENTRY = as.numeric(as.character(AGE_ENTRY)),
+         MD_FAMINC = as.numeric(as.character(MD_FAMINC)),
+         COSTT4_A = as.numeric(as.character(COSTT4_A)),
+         DEBT_TO_EARN = GRAD_DEBT_MDN/MD_EARN_WNE_P8,
+         maj_pay = as.numeric(as.character(COMPL_RPY_3YR_RT)) > 0.5,
+         status = factor(ifelse(maj_pay,"Majority", "Less")),
+         status = relevel(status, ref="Less")) %>% filter(!is.na(status)) 
+
+set.seed(1)
+college_parts <- resample_partition(colleges2 ,c(train = 0.6, valid = 0.2, test = 0.2)) 
+
+college_parts_train <- as_tibble(college_parts$train)
+college_parts_test <- as_tibble(college_parts$test)
+college_parts_valid <- as_tibble(college_parts$valid)
+
+# linear model
+# model <- lm(COMPL_RPY_3YR_RT ~ DEBT_TO_EARN + PCTPELL + MD_EARN_WNE_P8 +  CDR3 + AGE_ENTRY + log2(COSTT4_A), log2(MD_FAMINC), data = college_09_15_train_mod)
+
+fit_logit <- glm(status ~ DEBT_TO_EARN + PCTPELL + MD_EARN_WNE_P8 +  CDR3 + AGE_ENTRY + COSTT4_A + MD_FAMINC, family=binomial(link="logit"), data=college_parts_train)
+
+# run on test data
+pred <- predict(fit_logit, college_parts_test, type="response") 
+levels(college_parts_test$status) # 0 = Less, 1 = Majority
+
+pred_fc <- ifelse(pred > 0.5, "Majority", "Less")
+head(pred_fc)
+
+head(college_parts_test$status)
+
+mean(pred_fc == college_parts_test$status, na.rm=TRUE) # accuracy
+
+# linear model check
+colleges3 <- as_tibble(colleges2) %>% 
+  mutate(
+         COMPL_RPY_3YR_RT = as.numeric(as.character(COMPL_RPY_3YR_RT)),
+         PCTPELL = as.numeric(as.character(PCTPELL)),
+         GRAD_DEBT_MDN = as.numeric(as.character(GRAD_DEBT_MDN)),
+         MD_EARN_WNE_P8 = as.numeric(as.character(MD_EARN_WNE_P8)),
+         CDR3 = as.numeric(as.character(CDR3)),
+         AGE_ENTRY = as.numeric(as.character(AGE_ENTRY)),
+         MD_FAMINC = as.numeric(as.character(MD_FAMINC)),
+         COSTT4_A = as.numeric(as.character(COSTT4_A)),
+         DEBT_TO_EARN = GRAD_DEBT_MDN/MD_EARN_WNE_P8)
+
+set.seed(1)
+college_parts_lin <- resample_partition(colleges3 ,c(train = 0.6, valid = 0.2, test = 0.2)) 
+
+college_parts_train_lin <- as_tibble(college_parts$train)
+college_parts_test_lin <- as_tibble(college_parts$test)
+college_parts_valid_lin <- as_tibble(college_parts$valid)
+
+#college_lm_train <- college_parts_train %>%
+  #filter(Year != "2009-10")
+
+college_parts_train_lin <- college_parts_train_lin %>%
+  filter(Year != "2009-10")
+
+college_parts_train_lin %>%
+  ggplot() +
+  geom_point(aes(x = log2(log2(MD_FAMINC)), y = COMPL_RPY_3YR_RT), alpha = 0.2) +
+  facet_wrap(~Year)
+
+college_parts_train_lin %>%
+  ggplot() +
+  geom_boxplot(aes(x = as.factor(CONTROL), y = COMPL_RPY_3YR_RT), alpha = 0.2) +
+  facet_wrap(~Year)
+  
+model <- lm(COMPL_RPY_3YR_RT ~ DEBT_TO_EARN + PCTPELL + MD_EARN_WNE_P8 +  CDR3 + AGE_ENTRY + log2(COSTT4_A) +  log2(MD_FAMINC), data = college_parts_train_lin)
+
+summary(model)
+
+rmse(model, college_09_15_train_mod)
+
+
+# notes
+# logistic regression attempt
+# college_log1 <- college_parts_train %>% mutate(
+  #maj_pay = as.numeric(as.character(COMPL_RPY_3YR_RT)) > 0.5,
+  #status = factor(ifelse(maj_pay,"Majority", "Less")),
+  #status = relevel(status, ref="Less")) 
+
+# DEBT_TO_EARN = as.numeric(as.character(GRAD_DEBT_MDN))/as.numeric(as.character(MD_EARN_WNE_P8)),
+```
+
